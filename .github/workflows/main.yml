@@ -71,7 +71,7 @@ jobs:
       - name: Construir APK
         run: |
           cd "$PROJECT_DIR"
-        ./gradlew assembleDebug --stacktrace -Pkotlin.jvm.target.validation.mode=warning
+          ./gradlew assembleDebug --stacktrace -Pkotlin.jvm.target.validation.mode=warning
         
 
       - name: Buscar APK
