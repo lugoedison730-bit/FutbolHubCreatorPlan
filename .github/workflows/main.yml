@@ -25,24 +25,37 @@ jobs:
       - name: Configurar Android
         uses: android-actions/setup-android@v3
 
+      - name: Instalar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
       - name: Buscar proyecto Android
         run: |
-          GRADLEW=$(find proyecto -name gradlew -type f | head -n 1)
-          if [ -z "$GRADLEW" ]; then
-            echo "No se encontró el archivo gradlew"
-            echo "El proyecto no tiene una estructura Android válida."
+          SETTINGS=$(find proyecto -name settings.gradle.kts -o -name settings.gradle | head -n 1)
+
+          if [ -z "$SETTINGS" ]; then
+            echo "No se encontró settings.gradle ni settings.gradle.kts"
+            echo "El proyecto Android no fue encontrado."
             exit 1
           fi
-          echo "Proyecto encontrado:"
-          dirname "$GRADLEW"
+
+          PROJECT_DIR=$(dirname "$SETTINGS")
+
+          echo "Proyecto Android encontrado:"
+          echo "$PROJECT_DIR"
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       - name: Construir APK
         run: |
-          GRADLEW=$(find proyecto -name gradlew -type f | head -n 1)
-          PROJECT_DIR=$(dirname "$GRADLEW")
           cd "$PROJECT_DIR"
-          chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          gradle assembleDebug --stacktrace
+
+      - name: Buscar APK
+        run: |
+          echo "APKs generados:"
+          find "$PROJECT_DIR" -type f -name "*.apk" -print
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
@@ -51,3 +64,4 @@ jobs:
           path: |
             proyecto/**/build/outputs/apk/**/*.apk
             proyecto/**/build/outputs/apk/*.apk
+          if-no-files-found: error
