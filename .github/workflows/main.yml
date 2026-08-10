@@ -1,4 +1,4 @@
-name: Construir APK Fútbol Hub + Creator Plan
+name: Construir APK Fútbol Hub + Plan Creador
 
 on:
   workflow_dispatch:
@@ -32,36 +32,45 @@ jobs:
 
       - name: Buscar proyecto Android
         run: |
-          SETTINGS=$(find proyecto -name settings.gradle.kts -o -name settings.gradle | head -n 1)
+          PROJECT_DIR=$(find proyecto -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) -print -quit | xargs dirname)
 
-          if [ -z "$SETTINGS" ]; then
-            echo "No se encontró settings.gradle ni settings.gradle.kts"
-            echo "El proyecto Android no fue encontrado."
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "No se encontró un proyecto Android"
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$SETTINGS")
-
-          echo "Proyecto Android encontrado:"
-          echo "$PROJECT_DIR"
-
+          echo "Proyecto Android encontrado en: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+      - name: Corregir compatibilidad Java y Kotlin
+        run: |
+          cd "$PROJECT_DIR"
+
+          find . -type f \( -name "*.gradle" -o -name "*.gradle.kts" \) -print0 | while IFS= read -r -d '' file; do
+            sed -i '/compileOptions[[:space:]]*{/a\        sourceCompatibility JavaVersion.VERSION_17\n        targetCompatibility JavaVersion.VERSION_17' "$file" || true
+          done
+
+          find . -type f \( -name "*.gradle" -o -name "*.gradle.kts" \) -print0 | while IFS= read -r -d '' file; do
+            sed -i 's/jvmTarget[[:space:]]*=[[:space:]]*["'\'']1\.8["'\'']/jvmTarget = "17"/g' "$file" || true
+          done
+
+      - name: Dar permisos a Gradle
+        run: |
+          cd "$PROJECT_DIR"
+          chmod +x gradlew
 
       - name: Construir APK
         run: |
           cd "$PROJECT_DIR"
-          gradle assembleDebug --stacktrace
+          ./gradlew assembleDebug --stacktrace
 
       - name: Buscar APK
         run: |
-          echo "APKs generados:"
           find "$PROJECT_DIR" -type f -name "*.apk" -print
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
-          name: FutbolHubCreatorPlan-APK
+          name: futbolhub-apk
           path: |
-            proyecto/**/build/outputs/apk/**/*.apk
-            proyecto/**/build/outputs/apk/*.apk
-          if-no-files-found: error
+            ${{ env.PROJECT_DIR }}/**/*.apk
