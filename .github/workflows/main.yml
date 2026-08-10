@@ -43,8 +43,8 @@ jobs:
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
         - name: Corregir compatibilidad Java y Kotlin
-        run: |
-        cd "$PROJECT_DIR"
+          run: |
+            cd "$PROJECT_DIR"
 
           find . -type f \( -name "*.gradle" -o -name "*.gradle.kts" \) -print0 | while IFS= read -r -d '' file; do
             echo "Revisando: $file"
