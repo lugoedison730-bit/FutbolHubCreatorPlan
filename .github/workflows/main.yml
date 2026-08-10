@@ -1,7 +1,10 @@
-name: Construir APK Fútbol Hub + Plan Creador
+name: Construir APK FútbolHub + Plan Creador
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   build:
@@ -13,74 +16,91 @@ jobs:
 
       - name: Preparar proyecto
         run: |
+          rm -rf proyecto
           mkdir -p proyecto
-          unzip -q *.zip -d proyecto
+          unzip -q ./*.zip -d proyecto
 
       - name: Configurar Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+          cache: gradle
 
       - name: Configurar Android
         uses: android-actions/setup-android@v3
 
-      - name: Instalar Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.7'
-
       - name: Buscar proyecto Android
         run: |
-          PROJECT_DIR=$(find proyecto -type f \( -name "settings.gradle" -o -name "settings.gradle.kts" \) -print -quit | xargs dirname)
+          PROJECT_DIR=$(find proyecto -type f -name "gradlew" -print -quit | xargs -r dirname)
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "No se encontró un proyecto Android"
+            echo "ERROR: No se encontró el archivo gradlew."
+            echo "Contenido del directorio proyecto:"
+            find proyecto -maxdepth 4 -type f | head -100
             exit 1
           fi
 
           echo "Proyecto Android encontrado en: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-        - name: Corregir compatibilidad Java y Kotlin
-          run: |
-            cd "$PROJECT_DIR"
+      - name: Corregir compatibilidad Java y Kotlin
+        run: |
+          cd "$PROJECT_DIR"
 
-          find . -type f \( -name "*.gradle" -o -name "*.gradle.kts" \) -print0 | while IFS= read -r -d '' file; do
+          find . -type f \( -name "*.gradle" -o -name "*.gradle.kts" \) -print | while read -r file; do
             echo "Revisando: $file"
 
             if grep -q "compileOptions" "$file"; then
-              sed -i 's/sourceCompatibility[[:space:]]*=[[:space:]]*JavaVersion.VERSION_1_8/sourceCompatibility = JavaVersion.VERSION_17/g' "$file"
-              sed -i 's/targetCompatibility[[:space:]]*=[[:space:]]*JavaVersion.VERSION_1_8/targetCompatibility = JavaVersion.VERSION_17/g' "$file"
+              sed -i 's/sourceCompatibility[[:space:]]*=[[:space:]]*JavaVersion.VERSION_[0-9]*/sourceCompatibility = JavaVersion.VERSION_17/g' "$file"
+              sed -i 's/targetCompatibility[[:space:]]*=[[:space:]]*JavaVersion.VERSION_[0-9]*/targetCompatibility = JavaVersion.VERSION_17/g' "$file"
             fi
 
-            sed -i 's/jvmTarget[[:space:]]*=[[:space:]]*"1.8"/jvmTarget = "17"/g' "$file"
-            sed -i "s/jvmTarget[[:space:]]*=[[:space:]]*'1.8'/jvmTarget = '17'/g" "$file"
+            sed -i 's/jvmTarget[[:space:]]*=[[:space:]]*["'\''][^"'\'']*["'\'']/jvmTarget = "17"/g' "$file"
+            sed -i 's/jvmTarget[[:space:]]*=[[:space:]]*JavaVersion.VERSION_[0-9]*/jvmTarget = "17"/g' "$file"
           done
 
           echo "=== Configuración Java/Kotlin encontrada ==="
-          grep -RniE "sourceCompatibility|targetCompatibility|jvmTarget" . \
+          grep -RniE "sourceCompatibility|targetCompatibility|jvmTarget" \
             --include="*.gradle" \
-            --include="*.gradle.kts" || true
+            --include="*.gradle.kts" . || true
 
       - name: Dar permisos a Gradle
         run: |
           cd "$PROJECT_DIR"
-          chmod +x gradlew
+
+          if [ ! -f "./gradlew" ]; then
+            echo "ERROR: No existe gradlew en $PROJECT_DIR"
+            exit 1
+          fi
+
+          chmod +x ./gradlew
 
       - name: Construir APK
         run: |
           cd "$PROJECT_DIR"
-          ./gradlew assembleDebug --stacktrace -Pkotlin.jvm.target.validation.mode=warning
-        
+
+          ./gradlew assembleDebug --stacktrace --no-daemon
 
       - name: Buscar APK
         run: |
-          find "$PROJECT_DIR" -type f -name "*.apk" -print
+          mkdir -p artifacts
+
+          APK=$(find "$PROJECT_DIR" -type f -name "*.apk" -print -quit)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: No se encontró ningún APK."
+            exit 1
+          fi
+
+          echo "APK encontrado:"
+          echo "$APK"
+
+          cp "$APK" artifacts/futbolhub-debug.apk
 
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
           name: futbolhub-apk
-          path: |
-            ${{ env.PROJECT_DIR }}/**/*.apk
+          path: artifacts/futbolhub-debug.apk
+          if-no-files-found: error
