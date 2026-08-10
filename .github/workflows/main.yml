@@ -8,207 +8,100 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
-      # ============================================================
-      # 1. DESCARGAR EL REPOSITORIO
-      # ============================================================
       - name: Descargar proyecto
         uses: actions/checkout@v4
 
-
-      # ============================================================
-      # 2. PREPARAR EL PROYECTO
-      # ============================================================
       - name: Preparar proyecto
         shell: bash
         run: |
           set -e
 
-          echo "=== Archivos del repositorio ==="
-          find . -maxdepth 3 -type f | sort | head -200
+          rm -rf proyecto
+          mkdir -p proyecto
 
-          echo ""
-          echo "=== Buscando archivos ZIP ==="
+          ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
 
-          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -1 || true)
-
-          if [ -n "$ZIP_FILE" ]; then
-            echo "ZIP encontrado: $ZIP_FILE"
-
-            rm -rf proyecto
-            mkdir -p proyecto
-
-            unzip -q "$ZIP_FILE" -d proyecto
-
-            echo "ZIP descomprimido."
-          else
-            echo "No se encontró ZIP."
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No se encontró ningún archivo ZIP."
+            exit 1
           fi
 
-          echo ""
-          echo "=== Contenido después de preparar ==="
-          find . -maxdepth 5 -type f | sort | head -300
+          echo "ZIP encontrado: $ZIP_FILE"
 
+          unzip -q "$ZIP_FILE" -d proyecto
 
-      # ============================================================
-      # 3. CONFIGURAR JAVA 17
-      # ============================================================
+          echo "Contenido inicial:"
+          find proyecto -maxdepth 4 -type f | sort
+
       - name: Configurar Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-          cache: gradle
+          java-version: "17"
 
-
-      # ============================================================
-      # 4. CONFIGURAR ANDROID SDK
-      # ============================================================
       - name: Configurar Android
         uses: android-actions/setup-android@v3
 
-
-      # ============================================================
-      # 5. INSTALAR GRADLE 8.7
-      # ============================================================
       - name: Instalar Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.7'
+          gradle-version: "8.7"
 
-
-      # ============================================================
-      # 6. ENCONTRAR EL PROYECTO ANDROID
-      # ============================================================
       - name: Buscar proyecto Android
         shell: bash
         run: |
           set -e
 
-          echo "=== Buscando settings.gradle o settings.gradle.kts ==="
+          echo "=== Buscando proyecto Android ==="
 
-          SETTINGS_FILE=$(find . \
+          SETTINGS_FILE=$(find proyecto \
             -type f \
             \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
-            -not -path "./.git/*" \
-            | head -1 || true)
+            -print -quit)
 
           if [ -z "$SETTINGS_FILE" ]; then
             echo "ERROR: No se encontró settings.gradle ni settings.gradle.kts."
-            echo ""
-            echo "Contenido del repositorio:"
-            find . -maxdepth 5 -type f | sort
+
+            echo "Contenido del directorio proyecto:"
+            find proyecto -maxdepth 5 -type f | sort
+
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$SETTINGS_FILE")
 
-          echo "Archivo encontrado: $SETTINGS_FILE"
-          echo "Proyecto Android: $PROJECT_DIR"
+          echo "Archivo de configuración encontrado:"
+          echo "$SETTINGS_FILE"
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo ""
-          echo "=== Contenido del proyecto ==="
-          find "$PROJECT_DIR" -maxdepth 5 -type f | sort
+          echo "Proyecto Android:"
+          echo "$PROJECT_DIR"
 
-
-      # ============================================================
-      # 7. CREAR GRADLE WRAPPER SI NO EXISTE
-      # ============================================================
-      - name: Crear Gradle Wrapper
+      - name: Revisar configuración Gradle
         shell: bash
         run: |
           set -e
 
           cd "$PROJECT_DIR"
 
-          echo "=== Comprobando Gradle Wrapper ==="
+          echo "=== Proyecto ==="
+          pwd
 
-          if [ -f "./gradlew" ]; then
-            echo "gradlew ya existe."
-          else
-            echo "gradlew NO existe."
-            echo "Generando Gradle Wrapper con Gradle 8.7..."
-
-            gradle wrapper \
-              --gradle-version 8.7 \
-              --distribution-type bin
-
-            echo "Gradle Wrapper generado."
-          fi
-
-          echo ""
+          echo
           echo "=== Archivos Gradle ==="
-          find . -maxdepth 3 \
-            -type f \
-            \( -name "gradlew" -o -name "gradle-wrapper.properties" \) \
-            -print
+          find . -maxdepth 4 -type f \
+            \( -name "*.gradle" -o -name "*.gradle.kts" \) \
+            -print | sort
 
-          chmod +x ./gradlew
-
-
-      # ============================================================
-      # 8. MOSTRAR CONFIGURACIÓN
-      # ============================================================
-      - name: Revisar configuración Android
-        shell: bash
-        run: |
-          set -e
-
-          cd "$PROJECT_DIR"
-
-          echo "======================================"
-          echo " CONFIGURACIÓN DEL PROYECTO"
-          echo "======================================"
-
-          echo ""
-          echo "Java:"
+          echo
+          echo "=== Versión de Java ==="
           java -version
 
-          echo ""
-          echo "Gradle:"
-          ./gradlew --version
+          echo
+          echo "=== Versión de Gradle ==="
+          gradle --version
 
-          echo ""
-          echo "Archivos Gradle:"
-          find . -type f \
-            \( -name "*.gradle" -o -name "*.gradle.kts" \) \
-            -print
-
-
-      # ============================================================
-      # 9. DAR PERMISOS A GRADLE
-      # ============================================================
-      - name: Dar permisos a Gradle
-        shell: bash
-        run: |
-          set -e
-
-          cd "$PROJECT_DIR"
-
-          chmod +x gradlew
-
-          echo "Permisos de gradlew:"
-          ls -l gradlew
-
-
-      # ============================================================
-      # 10. LIMPIAR PROYECTO
-      # ============================================================
-      - name: Limpiar proyecto
-        shell: bash
-        run: |
-          set -e
-
-          cd "$PROJECT_DIR"
-
-          ./gradlew clean --stacktrace
-
-
-      # ============================================================
-      # 11. CONSTRUIR APK DEBUG
-      # ============================================================
       - name: Construir APK
         shell: bash
         run: |
@@ -216,41 +109,32 @@ jobs:
 
           cd "$PROJECT_DIR"
 
-          echo "======================================"
-          echo " CONSTRUYENDO APK"
-          echo "======================================"
+          echo "=== Construyendo APK Debug ==="
 
-          ./gradlew assembleDebug \
+          gradle \
+            --no-daemon \
             --stacktrace \
-            --no-daemon
+            --info \
+            assembleDebug
 
-
-      # ============================================================
-      # 12. BUSCAR APK GENERADO
-      # ============================================================
       - name: Buscar APK
         shell: bash
         run: |
           set -e
 
-          echo "======================================"
-          echo " BUSCANDO APK"
-          echo "======================================"
+          echo "=== Buscando APK generado ==="
 
           APK_FILE=$(find "$PROJECT_DIR" \
             -type f \
             -name "*.apk" \
-            | head -1 || true)
+            -print -quit)
 
           if [ -z "$APK_FILE" ]; then
             echo "ERROR: No se encontró ningún APK."
-            echo ""
-            echo "Contenido de build:"
-            find "$PROJECT_DIR" \
-              -type f \
-              \( -path "*/build/*" -o -name "*.apk" \) \
-              | sort \
-              | head -300
+
+            echo
+            echo "Archivos generados:"
+            find "$PROJECT_DIR" -type f | sort
 
             exit 1
           fi
@@ -258,31 +142,11 @@ jobs:
           echo "APK encontrado:"
           echo "$APK_FILE"
 
-          echo "APK_PATH=$APK_FILE" >> "$GITHUB_ENV"
+          echo "APK_FILE=$APK_FILE" >> "$GITHUB_ENV"
 
-
-      # ============================================================
-      # 13. COPIAR APK A UNA CARPETA SIMPLE
-      # ============================================================
-      - name: Preparar APK final
-        shell: bash
-        run: |
-          set -e
-
-          mkdir -p output
-
-          cp "$APK_PATH" output/FutbolHub-debug.apk
-
-          echo "APK final:"
-          ls -lh output/FutbolHub-debug.apk
-
-
-      # ============================================================
-      # 14. GUARDAR APK COMO ARTEFACTO
-      # ============================================================
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
           name: futbolhub-apk
-          path: output/FutbolHub-debug.apk
+          path: ${{ env.APK_FILE }}
           if-no-files-found: error
