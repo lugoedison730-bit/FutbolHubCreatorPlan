@@ -1,25 +1,58 @@
-name: Construir APK FútbolHub + Plan Creador
+name: Construir APK FútbolHub + Planifica
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ============================================================
+      # 1. DESCARGAR EL REPOSITORIO
+      # ============================================================
       - name: Descargar proyecto
         uses: actions/checkout@v4
 
-      - name: Preparar proyecto
-        run: |
-          rm -rf proyecto
-          mkdir -p proyecto
-          unzip -q ./*.zip -d proyecto
 
+      # ============================================================
+      # 2. PREPARAR EL PROYECTO
+      # ============================================================
+      - name: Preparar proyecto
+        shell: bash
+        run: |
+          set -e
+
+          echo "=== Archivos del repositorio ==="
+          find . -maxdepth 3 -type f | sort | head -200
+
+          echo ""
+          echo "=== Buscando archivos ZIP ==="
+
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -1 || true)
+
+          if [ -n "$ZIP_FILE" ]; then
+            echo "ZIP encontrado: $ZIP_FILE"
+
+            rm -rf proyecto
+            mkdir -p proyecto
+
+            unzip -q "$ZIP_FILE" -d proyecto
+
+            echo "ZIP descomprimido."
+          else
+            echo "No se encontró ZIP."
+          fi
+
+          echo ""
+          echo "=== Contenido después de preparar ==="
+          find . -maxdepth 5 -type f | sort | head -300
+
+
+      # ============================================================
+      # 3. CONFIGURAR JAVA 17
+      # ============================================================
       - name: Configurar Java
         uses: actions/setup-java@v4
         with:
@@ -27,80 +60,229 @@ jobs:
           java-version: '17'
           cache: gradle
 
+
+      # ============================================================
+      # 4. CONFIGURAR ANDROID SDK
+      # ============================================================
       - name: Configurar Android
         uses: android-actions/setup-android@v3
 
-      - name: Buscar proyecto Android
-        run: |
-          PROJECT_DIR=$(find proyecto -type f -name "gradlew" -print -quit | xargs -r dirname)
 
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: No se encontró el archivo gradlew."
-            echo "Contenido del directorio proyecto:"
-            find proyecto -maxdepth 4 -type f | head -100
+      # ============================================================
+      # 5. INSTALAR GRADLE 8.7
+      # ============================================================
+      - name: Instalar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+
+      # ============================================================
+      # 6. ENCONTRAR EL PROYECTO ANDROID
+      # ============================================================
+      - name: Buscar proyecto Android
+        shell: bash
+        run: |
+          set -e
+
+          echo "=== Buscando settings.gradle o settings.gradle.kts ==="
+
+          SETTINGS_FILE=$(find . \
+            -type f \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            -not -path "./.git/*" \
+            | head -1 || true)
+
+          if [ -z "$SETTINGS_FILE" ]; then
+            echo "ERROR: No se encontró settings.gradle ni settings.gradle.kts."
+            echo ""
+            echo "Contenido del repositorio:"
+            find . -maxdepth 5 -type f | sort
             exit 1
           fi
 
-          echo "Proyecto Android encontrado en: $PROJECT_DIR"
+          PROJECT_DIR=$(dirname "$SETTINGS_FILE")
+
+          echo "Archivo encontrado: $SETTINGS_FILE"
+          echo "Proyecto Android: $PROJECT_DIR"
+
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Corregir compatibilidad Java y Kotlin
+          echo ""
+          echo "=== Contenido del proyecto ==="
+          find "$PROJECT_DIR" -maxdepth 5 -type f | sort
+
+
+      # ============================================================
+      # 7. CREAR GRADLE WRAPPER SI NO EXISTE
+      # ============================================================
+      - name: Crear Gradle Wrapper
+        shell: bash
         run: |
+          set -e
+
           cd "$PROJECT_DIR"
 
-          find . -type f \( -name "*.gradle" -o -name "*.gradle.kts" \) -print | while read -r file; do
-            echo "Revisando: $file"
+          echo "=== Comprobando Gradle Wrapper ==="
 
-            if grep -q "compileOptions" "$file"; then
-              sed -i 's/sourceCompatibility[[:space:]]*=[[:space:]]*JavaVersion.VERSION_[0-9]*/sourceCompatibility = JavaVersion.VERSION_17/g' "$file"
-              sed -i 's/targetCompatibility[[:space:]]*=[[:space:]]*JavaVersion.VERSION_[0-9]*/targetCompatibility = JavaVersion.VERSION_17/g' "$file"
-            fi
+          if [ -f "./gradlew" ]; then
+            echo "gradlew ya existe."
+          else
+            echo "gradlew NO existe."
+            echo "Generando Gradle Wrapper con Gradle 8.7..."
 
-            sed -i 's/jvmTarget[[:space:]]*=[[:space:]]*["'\''][^"'\'']*["'\'']/jvmTarget = "17"/g' "$file"
-            sed -i 's/jvmTarget[[:space:]]*=[[:space:]]*JavaVersion.VERSION_[0-9]*/jvmTarget = "17"/g' "$file"
-          done
+            gradle wrapper \
+              --gradle-version 8.7 \
+              --distribution-type bin
 
-          echo "=== Configuración Java/Kotlin encontrada ==="
-          grep -RniE "sourceCompatibility|targetCompatibility|jvmTarget" \
-            --include="*.gradle" \
-            --include="*.gradle.kts" . || true
-
-      - name: Dar permisos a Gradle
-        run: |
-          cd "$PROJECT_DIR"
-
-          if [ ! -f "./gradlew" ]; then
-            echo "ERROR: No existe gradlew en $PROJECT_DIR"
-            exit 1
+            echo "Gradle Wrapper generado."
           fi
+
+          echo ""
+          echo "=== Archivos Gradle ==="
+          find . -maxdepth 3 \
+            -type f \
+            \( -name "gradlew" -o -name "gradle-wrapper.properties" \) \
+            -print
 
           chmod +x ./gradlew
 
-      - name: Construir APK
+
+      # ============================================================
+      # 8. MOSTRAR CONFIGURACIÓN
+      # ============================================================
+      - name: Revisar configuración Android
+        shell: bash
         run: |
+          set -e
+
           cd "$PROJECT_DIR"
 
-          ./gradlew assembleDebug --stacktrace --no-daemon
+          echo "======================================"
+          echo " CONFIGURACIÓN DEL PROYECTO"
+          echo "======================================"
 
-      - name: Buscar APK
+          echo ""
+          echo "Java:"
+          java -version
+
+          echo ""
+          echo "Gradle:"
+          ./gradlew --version
+
+          echo ""
+          echo "Archivos Gradle:"
+          find . -type f \
+            \( -name "*.gradle" -o -name "*.gradle.kts" \) \
+            -print
+
+
+      # ============================================================
+      # 9. DAR PERMISOS A GRADLE
+      # ============================================================
+      - name: Dar permisos a Gradle
+        shell: bash
         run: |
-          mkdir -p artifacts
+          set -e
 
-          APK=$(find "$PROJECT_DIR" -type f -name "*.apk" -print -quit)
+          cd "$PROJECT_DIR"
 
-          if [ -z "$APK" ]; then
+          chmod +x gradlew
+
+          echo "Permisos de gradlew:"
+          ls -l gradlew
+
+
+      # ============================================================
+      # 10. LIMPIAR PROYECTO
+      # ============================================================
+      - name: Limpiar proyecto
+        shell: bash
+        run: |
+          set -e
+
+          cd "$PROJECT_DIR"
+
+          ./gradlew clean --stacktrace
+
+
+      # ============================================================
+      # 11. CONSTRUIR APK DEBUG
+      # ============================================================
+      - name: Construir APK
+        shell: bash
+        run: |
+          set -e
+
+          cd "$PROJECT_DIR"
+
+          echo "======================================"
+          echo " CONSTRUYENDO APK"
+          echo "======================================"
+
+          ./gradlew assembleDebug \
+            --stacktrace \
+            --no-daemon
+
+
+      # ============================================================
+      # 12. BUSCAR APK GENERADO
+      # ============================================================
+      - name: Buscar APK
+        shell: bash
+        run: |
+          set -e
+
+          echo "======================================"
+          echo " BUSCANDO APK"
+          echo "======================================"
+
+          APK_FILE=$(find "$PROJECT_DIR" \
+            -type f \
+            -name "*.apk" \
+            | head -1 || true)
+
+          if [ -z "$APK_FILE" ]; then
             echo "ERROR: No se encontró ningún APK."
+            echo ""
+            echo "Contenido de build:"
+            find "$PROJECT_DIR" \
+              -type f \
+              \( -path "*/build/*" -o -name "*.apk" \) \
+              | sort \
+              | head -300
+
             exit 1
           fi
 
           echo "APK encontrado:"
-          echo "$APK"
+          echo "$APK_FILE"
 
-          cp "$APK" artifacts/futbolhub-debug.apk
+          echo "APK_PATH=$APK_FILE" >> "$GITHUB_ENV"
 
+
+      # ============================================================
+      # 13. COPIAR APK A UNA CARPETA SIMPLE
+      # ============================================================
+      - name: Preparar APK final
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p output
+
+          cp "$APK_PATH" output/FutbolHub-debug.apk
+
+          echo "APK final:"
+          ls -lh output/FutbolHub-debug.apk
+
+
+      # ============================================================
+      # 14. GUARDAR APK COMO ARTEFACTO
+      # ============================================================
       - name: Guardar APK
         uses: actions/upload-artifact@v4
         with:
           name: futbolhub-apk
-          path: artifacts/futbolhub-debug.apk
+          path: output/FutbolHub-debug.apk
           if-no-files-found: error
